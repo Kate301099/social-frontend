@@ -26,7 +26,20 @@ export default function ChatSection() {
         socket.addEventListener("message", (event) => {
             const receivedData = JSON.parse(event.data);
 
-            handleAppendMessage(currentChatId.toString(), receivedData)
+            if (receivedData.type === 'message') {
+                handleAppendMessage(currentChatId.toString(), receivedData);
+            }
+
+            //update status to seen
+            if (receivedData.type === 'update_status') {
+                setChat(prev =>
+                    prev.map(msg =>
+                        receivedData.message_ids.includes(msg.id)
+                            ? {...msg, status: receivedData.status}
+                            : msg
+                    )
+                );
+            }
         })
 
         connection.current = socket
@@ -38,9 +51,6 @@ export default function ChatSection() {
     //fetch message from DB
     useEffect(() => {
         if (!currentChatId) return;
-
-        const message_ids = [];
-
 
         const fetchMessages = async () => {
             try {
@@ -60,6 +70,28 @@ export default function ChatSection() {
                 }));
 
                 setChat(messagesWithDirection);
+
+                // filter unseen msg
+                const unseenMessageIds = resData.data
+                    .filter(item => item.from_id.toString() === currentChatId.toString() && item.status === 'sent')
+                    .map(item => item.id);
+
+                if (unseenMessageIds.length > 0 && connection.current?.readyState === 1) {
+                    connection.current.send(JSON.stringify({
+                        type: 'seen',
+                        message_ids: unseenMessageIds,
+                        from_id: localStorage.getItem('user_id'),
+                        to_id: currentChatId,
+                    }));
+                }
+
+                await fetch(`http://social-backend.local/api/messages/seen?from_id=${currentChatId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    },
+                });
+
             } catch (err) {
                 console.error('Failed to fetch messages:', err);
             }
@@ -102,9 +134,20 @@ export default function ChatSection() {
                     }),
                 });
 
-                const data = await response.json();
+                const res = await response.json();
 
-                console.log('Saved to DB:', data);
+                setChat(prev => prev.map(msg => {
+                    if (msg.tmp_id === tmpId) {
+                        return {
+                            ...msg,
+                            id: res.data.id,
+                            status: res.data.status || 'sent',
+                        };
+                    }
+                    return msg;
+                }));
+
+                console.log('Saved to DB:', res);
             } catch (error) {
                 console.error('Failed to send to backend:', error);
             }
@@ -205,6 +248,7 @@ export default function ChatSection() {
                                                             style={{width: "45px", height: "100%"}}
                                                         />
                                                     )}
+
                                                     <div>
                                                         <p
                                                             className={`small p-2 ${item.direction === 'in' ? "ms-3" : "me-3"} mb-1 rounded-3 ${
@@ -216,9 +260,12 @@ export default function ChatSection() {
                                                         <p className={`small ${item.direction === 'out' ? "ms-3" : "me-3"} mb-3 rounded-3 text-muted float-end`}>
                                                             12:00 PM | Aug 13
                                                         </p>
-                                                        <p className={`small ${item.direction === 'out' ? "ms-3" : "me-3"} mb-3 rounded-3 text-muted float-end`}>
-                                                            {item.status}
-                                                        </p>
+
+                                                        {item.direction === 'out' && item.status && (
+                                                            <p className="small ms-3 mb-3 rounded-3 text-muted float-end">
+                                                                {item.status === 'seen' ? 'Seen' : item.status === 'sent' ? 'Sent' : item.status}
+                                                            </p>
+                                                        )}
 
                                                     </div>
                                                     {item.direction === 'out' && (

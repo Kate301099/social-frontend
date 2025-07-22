@@ -1,7 +1,8 @@
 const WebSocket = require('ws');
 const wss = new WebSocket.Server({port: 8080});
 
-const clients = []
+const clients = [];
+const message_ids = [];
 
 wss.on('connection', ws => {
     console.log('Client connected');
@@ -15,6 +16,21 @@ wss.on('connection', ws => {
                 ws: ws
             })
         }
+
+        if (receivedData.type === 'seen') {
+            const toId = receivedData.to_id;
+
+            clients.forEach(client => {
+                if (client.id === toId.toString()) {
+                    client.ws.send(JSON.stringify({
+                        type: 'update_status',
+                        message_ids: receivedData.message_ids,
+                        status: 'seen',
+                    }));
+                }
+            });
+        }
+
 
         if (receivedData.type === 'message') {
             ws.send(JSON.stringify({
