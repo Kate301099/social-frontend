@@ -19,18 +19,23 @@ wss.on('connection', ws => {
         if (receivedData.type === 'message') {
             ws.send(JSON.stringify({
                 type: 'message',
+                id: '',
+                tmp_id: receivedData.tmp_id,
                 direction: 'out',
                 from_id: receivedData.from_id.toString(),
                 to_id: receivedData.to_id.toString(),
-                message: receivedData.message
+                message: receivedData.message,
+                status: 'sent',
             }));
 
             console.log(clients, receivedData)
 
             clients.forEach((client) => {
-                if (client.id === receivedData.to_id.toString()) {
+                if (client.id === receivedData.to_id.toString() && receivedData.to_id.toString() !== receivedData.from_id.toString()) {
                     client.ws.send(JSON.stringify({
                         type: 'message',
+                        id: '',
+                        tmp_id: receivedData.tmp_id,
                         from_id: receivedData.from_id.toString(),
                         to_id: receivedData.to_id.toString(),
                         direction: 'in',

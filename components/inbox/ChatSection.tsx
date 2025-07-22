@@ -1,4 +1,6 @@
 import React, {useEffect, useRef, useState} from "react";
+import {v4 as uuidv4} from 'uuid';
+
 
 // const websocket = new WebSocket('ws://localhost:8080');
 
@@ -6,7 +8,7 @@ import React, {useEffect, useRef, useState} from "react";
 export default function ChatSection() {
     const connection = useRef(null);
     const [message, setMessage] = useState("");
-    const currentChatId = useRef(0);
+    const [currentChatId, setCurrentChatId] = useState(0);
     const [chat, setChat] = useState([]);
 
     useEffect(() => {
@@ -24,50 +26,104 @@ export default function ChatSection() {
         socket.addEventListener("message", (event) => {
             const receivedData = JSON.parse(event.data);
 
-            handleAppendMessage(currentChatId.current.toString(), receivedData)
+            handleAppendMessage(currentChatId.toString(), receivedData)
         })
 
         connection.current = socket
 
-        return () => connection.current.close()
-    }, [])
+        // return () => connection.current.close()
+    }, [currentChatId])
 
-    // useEffect(() => {
-    //     socket.current.send(JSON.stringify({
-    //         type: 'my_id',
-    //         value: localStorage.getItem('user_id'),
-    //     }))
-    // }, [])
-    //
-    // useEffect(() => {
-    //     socket.current.onmessage = (event) => {
-    //         const receivedData = JSON.parse(event.data);
-    //
-    //         handleAppendMessage(receivedData)
-    //     };
-    // })
 
-    const handleSendMessage = (e: React.FormEvent) => {
+    //fetch message from DB
+    useEffect(() => {
+        if (!currentChatId) return;
+
+        const message_ids = [];
+
+
+        const fetchMessages = async () => {
+            try {
+                const response = await fetch(`http://social-backend.local/api/messages?to_id=${currentChatId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const resData = await response.json();
+                const myId = localStorage.getItem("user_id");
+
+                const messagesWithDirection = resData.data.map((item) => ({
+                    ...item,
+                    direction: item.from_id.toString() === myId ? "out" : "in"
+                }));
+
+                setChat(messagesWithDirection);
+            } catch (err) {
+                console.error('Failed to fetch messages:', err);
+            }
+        };
+
+        fetchMessages();
+
+    }, [currentChatId]);
+
+
+    //send message to WS and send to DB
+    const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (currentChatId.current > 0) {
+        if (currentChatId > 0) {
+            const tmpId = uuidv4();
+
             connection.current.send(JSON.stringify({
                 type: 'message',
+                id: '',
+                tmp_id: tmpId,
                 from_id: localStorage.getItem('user_id'),
-                to_id: currentChatId.current.toString(),
+                to_id: currentChatId.toString(),
                 message: message,
             }))
+
+            try {
+                const response = await fetch('http://social-backend.local/api/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    },
+                    body: JSON.stringify({
+                        tmp_id: tmpId,
+                        from_id: localStorage.getItem('user_id'),
+                        to_id: currentChatId.toString(),
+                        message: message,
+                        status: 'sent',
+                    }),
+                });
+
+                const data = await response.json();
+
+                console.log('Saved to DB:', data);
+            } catch (error) {
+                console.error('Failed to send to backend:', error);
+            }
 
             setMessage("");
         }
     }
 
+    //append message into array
     const handleAppendMessage = (chatId: string, messageData) => {
-        console.log(chatId, messageData)
-        if (messageData.from_id == chatId || messageData.to_id == chatId) {
-            chat.push(messageData)
+        const myId = localStorage.getItem("user_id");
+
+        if (
+            (messageData.from_id === chatId && messageData.to_id === myId) ||
+            (messageData.to_id === chatId && messageData.from_id === myId)
+        ) {
+            setChat(prev => [...prev, messageData]);
         }
-    }
+    };
 
     return (
         <section style={{backgroundColor: "#CDC4F9"}}>
@@ -99,7 +155,10 @@ export default function ChatSection() {
                                                             <a
                                                                 href="#!"
                                                                 className="d-flex justify-content-between"
-                                                                onClick={(e) => currentChatId.current = i}
+                                                                onClick={() => {
+                                                                    setCurrentChatId(i);
+                                                                    setChat([]);
+                                                                }}
                                                             >
                                                                 <div className="d-flex flex-row">
                                                                     <div>
@@ -157,6 +216,10 @@ export default function ChatSection() {
                                                         <p className={`small ${item.direction === 'out' ? "ms-3" : "me-3"} mb-3 rounded-3 text-muted float-end`}>
                                                             12:00 PM | Aug 13
                                                         </p>
+                                                        <p className={`small ${item.direction === 'out' ? "ms-3" : "me-3"} mb-3 rounded-3 text-muted float-end`}>
+                                                            {item.status}
+                                                        </p>
+
                                                     </div>
                                                     {item.direction === 'out' && (
                                                         <img
